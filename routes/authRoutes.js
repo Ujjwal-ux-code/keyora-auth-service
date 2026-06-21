@@ -89,6 +89,9 @@ router.post("/login", async (req, res) => {
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
 
+    user.refreshToken = refreshToken;
+    await user.save();
+
     res.status(200).json({
       success: true,
       accessToken,
@@ -132,7 +135,7 @@ router.get(
   }
 );
 
-router.post("/refresh", (req, res) => {
+router.post("/refresh", async (req, res) => {
   const { refreshToken } = req.body;
 
   if (!refreshToken) {
@@ -143,6 +146,17 @@ router.post("/refresh", (req, res) => {
   }
 
   try {
+    const user = await User.findOne({
+      refreshToken,
+    });
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid refresh token",
+      });
+    }
+
     const decoded = jwt.verify(
       refreshToken,
       process.env.REFRESH_SECRET
@@ -162,10 +176,44 @@ router.post("/refresh", (req, res) => {
       success: true,
       accessToken,
     });
+
   } catch (error) {
     return res.status(403).json({
       success: false,
       message: "Invalid refresh token",
+    });
+  }
+});
+
+router.post("/logout", async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({
+        success: false,
+        message: "Refresh token required",
+      });
+    }
+
+    const user = await User.findOne({
+      refreshToken,
+    });
+
+    if (user) {
+      user.refreshToken = null;
+      await user.save();
+    }
+
+    res.json({
+      success: true,
+      message: "Logged out successfully",
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Server Error",
     });
   }
 });
