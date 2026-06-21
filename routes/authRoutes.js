@@ -4,6 +4,8 @@ const User = require("../models/User");
 const jwt = require("jsonwebtoken");
 const protect = require("../middleware/authMiddleware");
 const adminOnly = require("../middleware/adminMiddleware");
+const crypto = require("crypto");
+const sendEmail = require("../utils/sendEmail");
 
 const {
   generateAccessToken,
@@ -38,18 +40,31 @@ router.post("/register", async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    const verificationToken =
+    crypto.randomBytes(32).toString("hex");
+
     // Create user
     const user = await User.create({
       name,
       email,
       password: hashedPassword,
+      verificationToken,
+      verificationTokenExpires:
+        Date.now() + 24 * 60 * 60 * 1000,
     });
 
-    res.status(201).json({
-      success: true,
-      message: "User registered successfully",
-      userId: user._id,
-    });
+    await sendEmail(
+      email,
+      "Verify Your Email",
+      `Click the link to verify your account:
+    http://localhost:5000/api/auth/verify-email/${verificationToken}`
+    );
+
+   res.status(201).json({
+     success: true,
+     message:
+    "Registration successful. Please check your email to verify your account.",
+   });
   } catch (error) {
     console.error(error);
 
@@ -70,6 +85,13 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "Invalid credentials",
+      });
+    }
+
+    if (!user.isVerified) {
+      return res.status(401).json({
+        success: false,
+        message: "Please verify your email first",
       });
     }
 
@@ -211,6 +233,119 @@ router.post("/logout", async (req, res) => {
     });
 
   } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
+  }
+});
+
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    const resetToken = crypto
+      .randomBytes(32)
+      .toString("hex");
+
+    user.resetPasswordToken = resetToken;
+    user.resetPasswordExpires =
+      Date.now() + 15 * 60 * 1000;
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: "Reset token generated",
+      resetToken,
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
+  }
+});
+
+router.post("/reset-password/:token", async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { password } = req.body;
+
+    const user = await User.findOne({
+      resetPasswordToken: token,
+      resetPasswordExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired token",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    user.password = hashedPassword;
+    user.resetPasswordToken = null;
+    user.resetPasswordExpires = null;
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: "Password reset successful",
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
+  }
+});
+
+router.get("/verify-email/:token", async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    const user = await User.findOne({
+      verificationToken: token,
+      verificationTokenExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired verification token",
+      });
+    }
+
+    user.isVerified = true;
+    user.verificationToken = undefined;
+    user.verificationTokenExpires = undefined;
+
+    await user.save();
+
+    res.json({
+      success: true,
+      message: "Email verified successfully",
+    });
+  } catch (error) {
+    console.error(error);
+
     res.status(500).json({
       success: false,
       message: "Server Error",
