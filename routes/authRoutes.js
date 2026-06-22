@@ -14,6 +14,17 @@ const {
 
 const router = express.Router();
 
+router.get(
+  "/admin/dashboard",
+  protect,
+  adminOnly,
+  (req, res) => {
+    res.json({
+      success: true,
+      message: "Welcome Admin",
+    });
+  }
+);
 
 router.post("/register", async (req, res) => {
   try {
@@ -346,6 +357,22 @@ router.get("/verify-email/:token", async (req, res) => {
   } catch (error) {
     console.error(error);
 
+    res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
+  }
+});
+
+router.get("/me", protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("-password");
+
+    res.status(200).json({
+      success: true,
+      user,
+    });
+  } catch (error) {
     res.status(500).json({
       success: false,
       message: "Server Error",
